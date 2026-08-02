@@ -8,8 +8,12 @@ from app.models.wallet import Wallet, Transaction
 from app.models.withdrawal import Withdrawal
 from app.models.user import User
 from app.schemas.withdrawal import WithdrawalRequest
-from app.services.routing_engine import get_best_route
+from app.services.routing_engine import get_payout_route
 from app.providers.flutterwave import FlutterwaveProvider
+from app.providers.flutterwave import FlutterwaveProvider
+from app.providers.wise import WiseProvider
+from app.providers.stripe_ach import StripeACHProvider
+from app.providers.budpay import BudPayProvider
 
 
 MIN_WITHDRAWAL = Decimal("5.00")
@@ -42,7 +46,16 @@ def validate_withdrawal(db: Session, user: User, amount: Decimal) -> Wallet:
                 f"Your balance is ${wallet.balance:.2f} "
                 f"but you tried to withdraw ${amount:.2f}."
             )
-        )
+    )
+    # KYC limit enforcement
+    from app.services.security_service import detect_suspicious_activity
+    detect_suspicious_activity(
+        db=db,
+        user=user,
+        action="withdrawal",
+        ip_address="system",
+        amount=float(amount)
+    )
     return wallet
 
 
@@ -58,11 +71,10 @@ def initiate_withdrawal(
     wallet = validate_withdrawal(db, user, amount)
 
     # Step 2 — Get best route
-    route = get_best_route(
-        amount=amount,
-        destination_country=bank.destination_country,
-        urgent=data.urgent,
-        preferred_provider=data.preferred_provider
+    route = get_payout_route(
+        amount=float(amount),
+        destination_country=destination_country,
+        urgent=urgent
     )
 
     fee = route.estimated_fee
@@ -126,15 +138,9 @@ def initiate_withdrawal(
         provider = FlutterwaveProvider()
     elif route.provider == "ach":
         provider = StripeACHProvider()
-    elif route.provider == "grey":
-        # Grey uses Flutterwave-compatible flow for now
-        # Full Grey API in Phase 9 grey-specific integration
-        provider = FlutterwaveProvider()
-    elif route.provider == "chipper_cash":
-        # Chipper Cash API coming soon — fallback to Flutterwave
-        provider = FlutterwaveProvider()
-    elif route.provider == "lemfi":
-        # LemFi API coming soon — fallback to Flutterwave
+    elif route.provider == "budpay":
+        provider = BudPayProvider()
+    elif route.provider in ["grey", "chipper_cash", "lemfi"]:
         provider = FlutterwaveProvider()
     else:
         # Default fallback
@@ -189,6 +195,30 @@ def initiate_withdrawal(
     )
     db.add(withdrawal)
     db.commit()
+
+    # Check for suspicious activity
+    from app.services.security_service import (
+        detect_suspicious_activity, log_audit_event
+    )
+    activity = detect_suspicious_activity(
+        db=db,
+        user=user,
+        action="withdrawal",
+        ip_address="system",
+        amount=float(amount)
+    )
+    if activity["is_suspicious"]:
+        log_audit_event(
+            db,
+            action="suspicious_withdrawal",
+            user_id=str(user.id),
+            ip_address="system",
+            details={
+                "amount": float(amount),
+                "flags": activity["flags"]
+            },
+            risk_level="high"
+        )
 
     return {
         "reference": reference,

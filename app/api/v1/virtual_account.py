@@ -16,37 +16,27 @@ router = APIRouter(prefix="/api/v1/virtual-account", tags=["Virtual Account"])
 
 class BankVerifyRequest(BaseModel):
     account_number: str
-    bank_code: str
+    bank_code: str = ""  # Optional — empty means auto-detect
+
 
 @router.post("/verify-bank")
-def verify_bank_account(
+def verify_bank_account_endpoint(
     data: BankVerifyRequest,
     current_user: User = Depends(get_current_user),
 ):
-    flw = FlutterwaveProvider()
-    result = flw.verify_account(data.account_number, data.bank_code)
+    """
+    Verify bank account.
+    If bank_code is empty, automatically detects the bank.
+    Never exposes which payment provider was used.
+    """
+    from app.services.account_verification_service import verify_bank_account
+    result = verify_bank_account(
+        data.account_number,
+        data.bank_code if data.bank_code else None
+    )
+
+    # Strip provider info — never expose to frontend
+    result.pop("verified_by", None)
+    result.pop("provider", None)
+
     return result
-
-@router.post("/create", response_model=VirtualAccountOut)
-def create_virtual_account(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Create a virtual USD account for the user.
-    Safe to call multiple times — returns existing account if already created.
-    """
-    account = get_or_create_virtual_account(db, current_user)
-    return account
-
-
-@router.get("/details")
-def get_account_details(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get full account details with platform-specific instructions
-    for Amazon KDP, Upwork, Fiverr, and wire transfers.
-    """
-    return get_virtual_account_details(db, current_user)

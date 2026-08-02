@@ -11,6 +11,7 @@ before processing. Never trust webhook data without verification.
 import hmac
 import hashlib
 import json
+import logging
 from fastapi import APIRouter, Request, HTTPException, Depends, Header
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -20,6 +21,8 @@ from app.core.config import settings
 from app.models.withdrawal import Withdrawal
 from app.models.wallet import Wallet, Transaction
 import uuid
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/webhooks", tags=["Webhooks"])
 
@@ -190,3 +193,56 @@ async def handle_grey_collection(db: Session, data: dict):
     # 3. Send notification
     # For now we log it — full implementation comes with Grey API access
     print(f"Grey collection received: {data}")
+
+@router.post("/paystack")
+async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
+    """
+    Handle Paystack transfer webhook events.
+    Paystack sends events when transfers complete or fail.
+    """
+    import hmac
+    import hashlib
+
+    payload = await request.body()
+    signature = request.headers.get("x-paystack-signature", "")
+
+    # Verify webhook signature
+    paystack_secret = settings.PAYSTACK_SECRET_KEY
+    expected = hmac.new(
+        paystack_secret.encode(),
+        payload,
+        hashlib.sha512
+    ).hexdigest()
+
+    if signature != expected:
+        logger.warning("Invalid Paystack webhook signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    data = await request.json()
+    event = data.get("event", "")
+    event_data = data.get("data", {})
+    reference = event_data.get("reference", "")
+
+    logger.info(f"Paystack webhook: {event} for {reference}")
+
+    if event == "transfer.success":
+        withdrawal = db.query(Withdrawal).filter(
+            Withdrawal.reference == reference
+        ).first()
+        if withdrawal:
+            withdrawal.status = "completed"
+            db.add(withdrawal)
+            db.commit()
+            logger.info(f"Paystack transfer completed: {reference}")
+
+    elif event == "transfer.failed":
+        withdrawal = db.query(Withdrawal).filter(
+            Withdrawal.reference == reference
+        ).first()
+        if withdrawal:
+            withdrawal.status = "failed"
+            db.add(withdrawal)
+            db.commit()
+            logger.warning(f"Paystack transfer failed: {reference}")
+
+    return {"status": "ok"}

@@ -92,3 +92,27 @@ def simulate_completion(
         "reference": reference,
         "status": "completed"
     }
+
+def sanitize_withdrawal_response(withdrawal_data: dict) -> dict:
+    """
+    Remove all third-party provider names from user-facing responses.
+    Users only see PayFlow branding.
+    """
+    # Map internal provider names to PayFlow branded names
+    provider_display = {
+        "paystack":      "PayFlow Transfer",
+        "flutterwave":   "PayFlow Transfer",
+        "chipper_cash":  "PayFlow Express",
+        "grey":          "PayFlow Transfer",
+        "lemfi":         "PayFlow Transfer",
+        "wise":          "PayFlow Global",
+        "wire":          "PayFlow Wire",
+        "ach":           "PayFlow ACH",
+        "budpay":        "PayFlow Transfer",
+    }
+
+    provider = withdrawal_data.get("provider", "")
+    withdrawal_data["provider"] = provider_display.get(
+        provider, "PayFlow Transfer"
+    )
+    return withdrawal_data

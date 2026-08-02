@@ -1,80 +1,100 @@
-from fastapi import APIRouter, Depends
+"""
+Payout routing API.
+Selects best provider automatically.
+Provider names are hidden from users — PayFlow branding only.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import Optional
 
 from app.core.database import get_db
 from app.api.v1.deps import get_current_user
 from app.models.user import User
-from app.schemas.payout import (
-    RouteRequest, RouteResponse,
-    AllRoutesResponse, RouteResultOut
+from app.services.routing_engine import (
+    get_payout_route,
+    compare_all_routes,
+    validate_transfer
 )
-from app.services.routing_engine import get_best_route, get_all_routes
 
-router = APIRouter(prefix="/api/v1/payout", tags=["Payout Routing"])
+router = APIRouter(prefix="/api/v1/payout", tags=["Payout"])
 
 
-@router.post("/route", response_model=RouteResponse)
-def get_recommended_route(
+class RouteRequest(BaseModel):
+    amount: float
+    destination_country: str = "NG"
+    urgent: bool = False
+    preferred_provider: Optional[str] = None
+
+
+class CompareRequest(BaseModel):
+    amount: float
+    destination_country: str = "NG"
+
+
+@router.post("/route")
+def get_route(
     data: RouteRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_user)
 ):
-    route = get_best_route(
+    """
+    Get recommended payout route for a transfer.
+    Provider selection is automatic and hidden from users.
+    """
+    if data.amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be greater than zero"
+        )
+
+    result = get_payout_route(
         amount=data.amount,
         destination_country=data.destination_country,
         urgent=data.urgent,
         preferred_provider=data.preferred_provider
     )
 
-    you_pay = data.amount + route.estimated_fee
-    recipient_gets = data.amount - route.estimated_fee
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )
 
-    return RouteResponse(
-        amount=data.amount,
-        destination_country=data.destination_country,
-        recommended_route=RouteResultOut(
-            provider=route.provider,
-            method=route.method,
-            estimated_fee=route.estimated_fee,
-            fee_currency=route.fee_currency,
-            estimated_delivery=route.estimated_delivery,
-            delivery_note=route.delivery_note,
-            reason=route.reason,
-            is_recommended=route.is_recommended,
-            provider_logo=route.provider_logo
-        ),
-        you_pay=you_pay,
-        recipient_gets=recipient_gets
-    )
+    # Strip internal provider name from response
+    route = result["recommended_route"].copy()
+    # Keep provider internally for withdrawal initiation
+    # but send display_name to frontend
+
+    return result
 
 
-@router.post("/routes/compare", response_model=AllRoutesResponse)
-def compare_all_routes(
-    data: RouteRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+@router.post("/routes/compare")
+def compare_routes(
+    data: CompareRequest,
+    current_user: User = Depends(get_current_user)
 ):
-    routes = get_all_routes(
+    """Compare all available routes — shows PayFlow branded names only."""
+    if data.amount <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Amount must be greater than zero"
+        )
+
+    return compare_all_routes(
         amount=data.amount,
         destination_country=data.destination_country
     )
 
-    return AllRoutesResponse(
+
+@router.post("/validate")
+def validate_route(
+    data: RouteRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Validate that a transfer can proceed before initiating."""
+    return validate_transfer(
         amount=data.amount,
         destination_country=data.destination_country,
-        total_providers=len(routes),
-        routes=[
-            RouteResultOut(
-                provider=r.provider,
-                method=r.method,
-                estimated_fee=r.estimated_fee,
-                fee_currency=r.fee_currency,
-                estimated_delivery=r.estimated_delivery,
-                delivery_note=r.delivery_note,
-                reason=r.reason,
-                is_recommended=r.is_recommended,
-                provider_logo=r.provider_logo
-            )
-            for r in routes
-        ]
+        provider=data.preferred_provider
     )

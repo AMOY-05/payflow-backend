@@ -11,6 +11,8 @@ from sqlalchemy.exc import OperationalError, IntegrityError
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 from app.core.config import settings
 from app.core.database import Base, engine
@@ -29,7 +31,7 @@ from app.core.errors import (
 )
 from app.api.v1 import (
     auth, users, wallet, virtual_account,
-    payout, fx, withdrawal, ai, webhooks, banks
+    payout, fx, withdrawal, ai, webhooks, banks, admin, kyc
 )
 import app.models
 
@@ -74,8 +76,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Request-ID",
+        "x-admin-key",
+        "X-Admin-Key",
+    ],
 )
 
 # Global error handlers
@@ -95,11 +103,23 @@ app.include_router(withdrawal.router)
 app.include_router(ai.router)
 app.include_router(webhooks.router)
 app.include_router(banks.router)
+app.include_router(admin.router)
+app.include_router(kyc.router)
 
+# Serve KYC uploads to admin only
+if os.path.exists(settings.KYC_UPLOAD_DIR):
+    app.mount(
+        "/uploads",
+        StaticFiles(directory="uploads"),
+        name="uploads"
+    )
 
 @app.on_event("startup")
 def on_startup():
-    Base.metadata.create_all(bind=engine)
+    import os
+    os.makedirs(settings.KYC_UPLOAD_DIR, exist_ok=True)
+    if settings.ENVIRONMENT != "production":
+        Base.metadata.create_all(bind=engine)
     logger.info(
         f"{settings.APP_NAME} v1.0.0 started "
         f"in {settings.ENVIRONMENT} mode"

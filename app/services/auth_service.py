@@ -1,4 +1,6 @@
+from asyncio.log import logger
 import random
+from venv import logger
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
@@ -9,6 +11,8 @@ from app.models.virtual_account import VirtualAccount
 from app.schemas.user import UserCreate
 from app.core.security import hash_password, verify_password
 
+import logging
+logger = logging.getLogger("fintech.auth")
 
 def get_user_by_email(db: Session, email: str) -> User | None:
     return db.query(User).filter(User.email == email).first()
@@ -66,6 +70,14 @@ def create_user(db: Session, user_in: UserCreate) -> User:
 
     db.commit()
     db.refresh(user)
+
+    # Send email verification
+    try:
+        from app.services.email_service import send_verification_email
+        send_verification_email(db, user)
+    except Exception as e:
+        logger.warning(f"Failed to send verification email: {e}")
+
     return user
 
 

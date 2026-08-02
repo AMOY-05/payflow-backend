@@ -34,15 +34,17 @@ class FlutterwaveProvider(BaseProvider):
 
     def _is_configured(self) -> bool:
         """
-        Controls whether we use real API or mock mode.
-
-        Currently set to False (mock mode) because Flutterwave
-        transfer activation is pending business verification.
-
-        Change to this when Flutterwave activates your account:
-        return bool(self.secret_key and self.secret_key != "")
+        Returns False for transfers (not yet activated).
+        Changed to False until Flutterwave activates transfers.
         """
         return False
+
+    def _can_verify_accounts(self) -> bool:
+        """
+        Account verification works with both test and live keys.
+        Only requires a valid secret key to be configured.
+        """
+        return bool(self.secret_key and self.secret_key != "")
 
     def get_banks(self, country: str = "NG") -> list:
         """
@@ -72,16 +74,15 @@ class FlutterwaveProvider(BaseProvider):
         bank_code: str
     ) -> dict:
         """
-        Verify that a bank account exists before sending money.
-        This is a critical step — always verify before transferring
-        to avoid sending money to wrong accounts.
-
-        Returns mock success in mock mode.
+        Verify that a bank account exists.
+        Uses real Flutterwave API if live keys are configured.
+        Falls back to asking user to enter name manually.
         """
-        if not self._is_configured():
+        if not self._can_verify_accounts():
             return {
-                "success": True,
-                "account_name": "ACCOUNT VERIFIED (MOCK)",
+                "success": False,
+                "account_name": None,
+                "message": "manual_entry",
                 "account_number": account_number
             }
 
@@ -93,21 +94,33 @@ class FlutterwaveProvider(BaseProvider):
                     "account_number": account_number,
                     "account_bank": bank_code
                 },
-                timeout=10.0
+                timeout=15.0
             )
             data = response.json()
             if data.get("status") == "success":
                 return {
                     "success": True,
                     "account_name": data["data"]["account_name"],
-                    "account_number": data["data"]["account_number"]
+                    "account_number": data["data"]["account_number"],
+                    "message": "verified"
                 }
             return {
                 "success": False,
-                "message": data.get("message", "Account verification failed")
+                "account_name": None,
+                "message": data.get("message", "Could not verify account")
+            }
+        except httpx.TimeoutException:
+            return {
+                "success": False,
+                "account_name": None,
+                "message": "manual_entry"
             }
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            return {
+                "success": False,
+                "account_name": None,
+                "message": str(e)
+            }
 
     def initiate_transfer(
         self,
@@ -244,11 +257,6 @@ class FlutterwaveProvider(BaseProvider):
             return {"status": "unknown", "error": str(e)}
 
     def _mock_nigerian_banks(self) -> list:
-        """
-        Real Nigerian bank list used when API key is not set
-        or when running in mock mode.
-        Includes all major Nigerian banks and fintech platforms.
-        """
         return [
             {"id": 1,  "code": "044",    "name": "Access Bank"},
             {"id": 2,  "code": "063",    "name": "Access Bank (Diamond)"},

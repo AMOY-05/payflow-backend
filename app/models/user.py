@@ -24,11 +24,20 @@ class User(Base):
 
     is_active = Column(Boolean, default=True, nullable=False)
     is_kyc_verified = Column(Boolean, default=False, nullable=False)
+    is_email_verified = Column(Boolean, default=False, nullable=False)
+
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now()
     )
 
     wallet = relationship("Wallet", back_populates="user", uselist=False)
-    virtual_account = relationship("VirtualAccount", back_populates="user", uselist=False)
+    virtual_account = relationship(
+        "VirtualAccount", back_populates="user", uselist=False
+    )
+    kyc = relationship("KYCVerification", back_populates="user", uselist=False)

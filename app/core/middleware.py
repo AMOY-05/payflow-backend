@@ -10,37 +10,54 @@ import uuid
 import logging
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+import uvicorn
 
 logger = logging.getLogger("fintech.requests")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
-    Adds security headers to every response.
-    These are standard headers that protect against
-    XSS, clickjacking, and other attacks.
+    Adds comprehensive security headers to every response.
     """
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
 
-        # Prevent browsers from sniffing content type
+        # Prevent MIME sniffing
         response.headers["X-Content-Type-Options"] = "nosniff"
 
         # Prevent clickjacking
         response.headers["X-Frame-Options"] = "DENY"
 
-        # Force HTTPS in production
+        # Force HTTPS
         response.headers["Strict-Transport-Security"] = (
-            "max-age=31536000; includeSubDomains"
+            "max-age=31536000; includeSubDomains; preload"
         )
 
-        # Control what information is sent in referrer
+        # Control referrer information
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
         # Restrict browser features
         response.headers["Permissions-Policy"] = (
-            "geolocation=(), microphone=(), camera=()"
+            "geolocation=(), microphone=(), camera=(), "
+            "payment=(), usb=(), magnetometer=()"
         )
+
+        # Content Security Policy
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' cdn.jsdelivr.net; "
+            "img-src 'self' data: https: fastapi.tiangolo.com; "
+            "font-src 'self' data: cdn.jsdelivr.net; "
+            "connect-src 'self' https://api.flutterwave.com "
+            "https://v6.exchangerate-api.com"
+        )
+
+        # Prevent XSS
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+
+        # Remove server info
+        response.headers["Server"] = "PayFlow/1.0"
 
         return response
 
