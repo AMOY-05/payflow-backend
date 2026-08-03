@@ -2,7 +2,8 @@ services:
   - type: web
     name: payflow-backend
     env: python
-    buildCommand: pip install -r requirements.txt && pip install uvicorn[standard] gunicorn
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: python -m alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
