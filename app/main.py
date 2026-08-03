@@ -3,7 +3,6 @@ Application entrypoint.
 """
 
 import logging
-import sentry_sdk
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -39,14 +38,6 @@ import app.models
 setup_logging()
 logger = logging.getLogger("fintech.startup")
 
-# Initialize Sentry for error monitoring (production only)
-if settings.SENTRY_DSN and settings.ENVIRONMENT == "production":
-    sentry_sdk.init(
-        dsn=settings.SENTRY_DSN,
-        traces_sample_rate=0.1,
-        environment=settings.ENVIRONMENT
-    )
-    logger.info("Sentry error monitoring initialized")
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -117,12 +108,31 @@ if os.path.exists(settings.KYC_UPLOAD_DIR):
 @app.on_event("startup")
 def on_startup():
     import os
+    import subprocess
+
+    # Create KYC upload directory
     os.makedirs(settings.KYC_UPLOAD_DIR, exist_ok=True)
-    if settings.ENVIRONMENT != "production":
-        Base.metadata.create_all(bind=engine)
+
+    # Run migrations automatically on every startup
+    # This handles production database migrations without needing shell access
+    try:
+        logger.info("Running database migrations...")
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
+        if result.returncode == 0:
+            logger.info("Migrations completed successfully")
+            logger.info(result.stdout)
+        else:
+            logger.error(f"Migration failed: {result.stderr}")
+    except Exception as e:
+        logger.error(f"Migration error: {e}")
+
     logger.info(
-        f"{settings.APP_NAME} v1.0.0 started "
-        f"in {settings.ENVIRONMENT} mode"
+        f"{settings.APP_NAME} started in {settings.ENVIRONMENT} mode"
     )
 
 
