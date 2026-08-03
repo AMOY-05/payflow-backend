@@ -19,10 +19,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add only the missing column to the users table
-    op.add_column('users', sa.Column('is_email_verified', sa.Boolean(), server_default=sa.text('false'), nullable=False))
+    # Everything in this step was already created in prior migrations
+    pass
 
 
 def downgrade() -> None:
-    # Drop only the added column if rolling back
-    op.drop_column('users', 'is_email_verified')
+    pass
