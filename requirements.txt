@@ -21,3 +21,4 @@ celery
 redis
 aiofiles
 python-json-logger
+email-validator
