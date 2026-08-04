@@ -62,19 +62,41 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(MaintenanceModeMiddleware)
 
+# Parse CORS origins from environment
+cors_origins = []
+if settings.CORS_ORIGINS:
+    cors_origins = [
+        origin.strip()
+        for origin in settings.CORS_ORIGINS.split(",")
+        if origin.strip()
+    ]
+
+# Always include localhost for development
+if settings.ENVIRONMENT != "production":
+    cors_origins.extend([
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ])
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=[
         "Authorization",
         "Content-Type",
         "X-Request-ID",
-        "x-admin-key",
         "X-Admin-Key",
+        "x-admin-key",
+        "Accept",
+        "Origin",
+        "Access-Control-Request-Method",
+        "Access-Control-Request-Headers",
     ],
+    expose_headers=["X-Request-ID"],
+    max_age=600,
 )
 
 # Global error handlers
