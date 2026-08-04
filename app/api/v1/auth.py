@@ -47,17 +47,25 @@ def register(
     db: Session = Depends(get_db)
 ):
     ip = get_client_ip(request)
-    user = create_user(db, user_in)
-
-    log_audit_event(
-        db,
-        action="user_registered",
-        user_id=str(user.id),
-        ip_address=ip,
-        details={"email": user.email, "country": user.country},
-        risk_level="low"
-    )
-    return user
+    try:
+        user = create_user(db, user_in)
+        log_audit_event(
+            db,
+            action="user_registered",
+            user_id=str(user.id),
+            ip_address=ip,
+            details={"email": user.email},
+            risk_level="low"
+        )
+        return user
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Registration failed: {str(e)}"
+        )
 
 
 @router.post("/login", response_model=Token)
