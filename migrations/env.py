@@ -28,13 +28,28 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    database_url = config.get_main_option("sqlalchemy.url")
+
+    # Fix postgres:// prefix
+    if database_url and database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+    # Add SSL for Render
+    connect_args = {}
+    if database_url and "render.com" in database_url:
+        connect_args = {"sslmode": "require"}
+
+    connectable = create_engine(
+        database_url,
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
+
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata
+        )
         with context.begin_transaction():
             context.run_migrations()
 
