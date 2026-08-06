@@ -1,22 +1,41 @@
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
-from alembic import context
+from sqlalchemy import pool, create_engine  # type: ignore[reportMissingImports]
+from alembic import context  # type: ignore[reportMissingImports]
+import os
+import sys
+
+# Add backend root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.config import settings
+from app.models import *  # noqa: F401 - imports all models for autogenerate
 from app.core.database import Base
-import app.models  # noqa: F401 — must import so Alembic sees all models
 
+# Alembic Config object
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
+# Setup logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Set target metadata for autogenerate
 target_metadata = Base.metadata
 
 
+def get_database_url():
+    """Get database URL with SSL fix for Render."""
+    url = settings.DATABASE_URL
+
+    # Fix postgres:// to postgresql:// for SQLAlchemy
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    return url
+
+
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    """Run migrations without a live database connection."""
+    url = get_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -28,19 +47,16 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    database_url = config.get_main_option("sqlalchemy.url")
+    """Run migrations with a live database connection."""
+    url = get_database_url()
 
-    # Fix postgres:// prefix
-    if database_url and database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
-
-    # Add SSL for Render
+    # Use SSL for Render hosted databases
     connect_args = {}
-    if database_url and "render.com" in database_url:
+    if "render.com" in url:
         connect_args = {"sslmode": "require"}
 
     connectable = create_engine(
-        database_url,
+        url,
         poolclass=pool.NullPool,
         connect_args=connect_args,
     )
