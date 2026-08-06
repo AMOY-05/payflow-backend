@@ -12,34 +12,29 @@ Fintech-specific notes:
   if this distinction is skipped.
 """
 
-from passlib.context import CryptContext
+import bcrypt
+#from passlib.context import CryptContext  # type: ignore[import]
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import secrets
 import string
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+#pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+
+import bcrypt
 
 def hash_password(password: str) -> str:
-    """
-    Hash password using bcrypt.
-    Truncates to 72 bytes to avoid bcrypt limitation on production.
-    """
-    # bcrypt has a 72-byte limit — truncate safely
-    password_bytes = password.encode("utf-8")[:72]
-    password_truncated = password_bytes.decode("utf-8", errors="ignore")
-    return pwd_context.hash(password_truncated)
-
+    # Encode string to bytes and truncate to 72 bytes maximum
+    pwd_bytes = password.encode('utf-8')[:72]
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verify password against hash.
-    Must truncate the same way as hash_password.
-    """
-    password_bytes = plain_password.encode("utf-8")[:72]
-    password_truncated = password_bytes.decode("utf-8", errors="ignore")
-    return pwd_context.verify(password_truncated, hashed_password)
+    pwd_bytes = plain_password.encode('utf-8')[:72]
+    hash_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(pwd_bytes, hash_bytes)
 
 
 def create_access_token(
