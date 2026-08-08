@@ -28,10 +28,18 @@ from app.core.errors import (
     integrity_error_handler,
     generic_error_handler
 )
-from app.api.v1 import (
-    auth, users, wallet, virtual_account,
-    payout, fx, withdrawal, ai, webhooks, banks, admin, kyc
-)
+from app.api.v1 import auth
+from app.api.v1 import users
+from app.api.v1 import wallet
+from app.api.v1 import payout
+from app.api.v1 import fx
+from app.api.v1 import withdrawal
+from app.api.v1 import ai
+from app.api.v1 import webhooks
+from app.api.v1 import banks
+from app.api.v1 import admin
+from app.api.v1 import kyc
+from app.api.v1.virtual_account import router as virtual_account_router
 import app.models
 
 # Import all model files here so SQLAlchemy recognizes their metadata
@@ -115,7 +123,7 @@ app.add_exception_handler(Exception, generic_error_handler)
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(wallet.router)
-app.include_router(virtual_account.router)
+app.include_router(virtual_account_router)
 app.include_router(payout.router)
 app.include_router(fx.router)
 app.include_router(withdrawal.router)
