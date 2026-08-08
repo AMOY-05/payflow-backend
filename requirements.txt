@@ -21,3 +21,4 @@ bleach
 pymongo
 aiofiles
 python-dateutil
+email-validator
