@@ -1,6 +1,6 @@
 from logging.config import fileConfig
-from sqlalchemy import pool, create_engine  # type: ignore[reportMissingImports]
-from alembic import context  # type: ignore[reportMissingImports]
+from sqlalchemy import engine_from_config, pool, create_engine
+from alembic import context
 import os
 import sys
 
