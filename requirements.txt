@@ -22,3 +22,4 @@ pymongo
 aiofiles
 python-dateutil
 email-validator
+0penai
