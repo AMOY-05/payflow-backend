@@ -9,39 +9,35 @@ Why JSON logs:
 
 import logging
 import sys
-from pythonjsonlogger import jsonlogger
-from app.core.config import settings
 
 
-def setup_logging():
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO if not settings.DEBUG else logging.DEBUG)
+def setup_logging(level: str = "INFO"):
+    """Configure application logging."""
+    log_level = getattr(logging, level.upper(), logging.INFO)
 
-    handler = logging.StreamHandler(sys.stdout)
+    # Create formatter
+    formatter = logging.Formatter(
+        fmt='{"time": "%(asctime)s", "name": "%(name)s", '
+            '"level": "%(levelname)s", "message": "%(message)s"}',
+        datefmt="%Y-%m-%dT%H:%M:%S"
+    )
 
-    if settings.ENVIRONMENT == "production":
-        formatter = jsonlogger.JsonFormatter(
-            fmt="%(asctime)s %(name)s %(levelname)s %(message)s",
-            datefmt="%Y-%m-%dT%H:%M:%S"
-        )
-    else:
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
 
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    return logger
+    # Remove existing handlers
+    root_logger.handlers.clear()
 
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
 
-def get_logger(name: str) -> logging.Logger:
-    return logging.getLogger(name)
+    # Silence noisy loggers
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-
-# Pre-configured loggers for each module
-auth_logger = get_logger("fintech.auth")
-wallet_logger = get_logger("fintech.wallet")
-withdrawal_logger = get_logger("fintech.withdrawal")
-fx_logger = get_logger("fintech.fx")
-webhook_logger = get_logger("fintech.webhook")
-security_logger = get_logger("fintech.security")
+    return root_logger
