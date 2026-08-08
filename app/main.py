@@ -34,6 +34,12 @@ from app.api.v1 import (
 )
 import app.models
 
+# Import all model files here so SQLAlchemy recognizes their metadata
+from app.models import user, virtual_account  # <--- Make sure virtual_account is imported!>
+
+# Create missing tables automatically on startup (use Base/engine from app.core.database)
+Base.metadata.create_all(bind=engine)
+
 # Setup logging first
 setup_logging()
 logger = logging.getLogger("fintech.startup")
