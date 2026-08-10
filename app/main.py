@@ -142,39 +142,53 @@ if os.path.exists(settings.KYC_UPLOAD_DIR):
     )
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     import os
+    import asyncio
     import subprocess
 
-    # Create KYC upload directory
     os.makedirs(settings.KYC_UPLOAD_DIR, exist_ok=True)
 
-    # Run migrations automatically on every startup
-    # This handles production database migrations without needing shell access
-    try:
-        logger.info("Running database migrations...")
-        result = subprocess.run(
-            ["alembic", "upgrade", "head"],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        )
-        if result.returncode == 0:
-            logger.info("Migrations completed successfully")
-            logger.info(result.stdout)
-        else:
-            logger.error(f"Migration failed: {result.stderr}")
-    except Exception as e:
-        logger.error(f"Migration error: {e}")
+    # Run migrations in background so server starts immediately
+    async def run_migrations():
+        try:
+            logger.info("Running database migrations...")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["python", "-m", "alembic", "upgrade", "head"],
+                    capture_output=True,
+                    text=True,
+                    cwd=os.path.dirname(
+                        os.path.dirname(os.path.abspath(__file__))
+                    )
+                )
+            )
+            if result.returncode == 0:
+                logger.info("Migrations completed successfully")
+            else:
+                logger.error(f"Migration failed: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Migration error: {e}")
 
-    logger.info(
-        f"{settings.APP_NAME} started in {settings.ENVIRONMENT} mode"
-    )
+    asyncio.create_task(run_migrations())
+    logger.info(f"PayFlow started in {settings.ENVIRONMENT} mode")
 
 
 @app.on_event("shutdown")
-def on_shutdown():
-    logger.info(f"{settings.APP_NAME} shutting down")
+async def on_shutdown():
+    logger.info("PayFlow shutting down")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    logger.info("PayFlow shutting down")
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": "PayFlow"}
+
 
 
 @app.get("/health", tags=["System"])
