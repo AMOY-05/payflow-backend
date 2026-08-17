@@ -43,10 +43,13 @@ from app.api.v1.virtual_account import router as virtual_account_router
 import app.models
 
 # Import all model files here so SQLAlchemy recognizes their metadata
-from app.models import user, virtual_account  # <--- Make sure virtual_account is imported!>
+from app.models import user, virtual_account
 
-# Create missing tables automatically on startup (use Base/engine from app.core.database)
-Base.metadata.create_all(bind=engine)
+# Alembic owns the schema. Leave this disabled.
+# create_all() builds tables directly from the models without recording
+# anything in Alembic's version table, and it never alters a table that
+# already exists. Running both means neither system knows what the other did.
+# Base.metadata.create_all(bind=engine)
 
 # Setup logging first
 setup_logging()
@@ -92,6 +95,14 @@ if settings.ENVIRONMENT != "production":
         "http://127.0.0.1:3000",
     ])
 
+# An empty allow_origins list blocks every cross-origin browser request.
+# In production that silently breaks the frontend with no server-side error.
+if settings.ENVIRONMENT == "production" and not cors_origins:
+    logger.warning(
+        "CORS_ORIGINS is empty in production. "
+        "All cross-origin browser requests will be blocked."
+    )
+
 # CORS
 app.add_middleware(
     CORSMiddleware,
@@ -133,62 +144,34 @@ app.include_router(banks.router)
 app.include_router(admin.router)
 app.include_router(kyc.router)
 
-# Serve KYC uploads to admin only
-if os.path.exists(settings.KYC_UPLOAD_DIR):
+# KYC uploads
+#
+# StaticFiles performs NO authentication. Anything mounted here is readable by
+# anyone who knows or guesses a filename, and these files are government IDs and
+# proof-of-address documents. The mount is therefore restricted to non-production
+# until an authenticated download route exists in app/api/v1/admin.py that checks
+# the admin key and streams the file.
+#
+# The directory also now matches the one that is checked and created at startup.
+if settings.ENVIRONMENT != "production" and os.path.exists(
+    settings.KYC_UPLOAD_DIR
+):
     app.mount(
         "/uploads",
-        StaticFiles(directory="uploads"),
+        StaticFiles(directory=settings.KYC_UPLOAD_DIR),
         name="uploads"
     )
 
+
 @app.on_event("startup")
 async def on_startup():
-    import os
-    import asyncio
-    import subprocess
-
     os.makedirs(settings.KYC_UPLOAD_DIR, exist_ok=True)
-
-    # Run migrations in background so server starts immediately
-    async def run_migrations():
-        try:
-            logger.info("Running database migrations...")
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    ["python", "-m", "alembic", "upgrade", "head"],
-                    capture_output=True,
-                    text=True,
-                    cwd=os.path.dirname(
-                        os.path.dirname(os.path.abspath(__file__))
-                    )
-                )
-            )
-            if result.returncode == 0:
-                logger.info("Migrations completed successfully")
-            else:
-                logger.error(f"Migration failed: {result.stderr}")
-        except Exception as e:
-            logger.error(f"Migration error: {e}")
-
-    asyncio.create_task(run_migrations())
     logger.info(f"PayFlow started in {settings.ENVIRONMENT} mode")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     logger.info("PayFlow shutting down")
-
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    logger.info("PayFlow shutting down")
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "app": "PayFlow"}
-
 
 
 @app.get("/health", tags=["System"])

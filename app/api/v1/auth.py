@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.core.rate_limit import limiter
@@ -60,11 +61,21 @@ def register(
         return user
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"Registration error: {str(e)}", exc_info=True)
+    except IntegrityError:
+        # Backstop. create_user() normally converts this itself, but if a
+        # constraint fires anywhere else it must not surface as a 500.
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists."
+        )
+    except Exception:
+        # The exception text stays in the log. It must not go to the client:
+        # database errors carry table names, column names and SQL fragments.
+        logger.error("Registration error", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Registration failed: {str(e)}"
+            detail="Registration failed. Please try again."
         )
 
 
@@ -135,6 +146,14 @@ def logout(
                 expires_at=expires_at,
                 reason="user_logout"
             )
+        else:
+            # A token with no exp cannot be blacklisted by the current
+            # schema, so say so rather than reporting a logout that did
+            # not actually invalidate anything.
+            logger.warning(
+                "Logout could not blacklist a token with no exp claim "
+                "for user %s", current_user.id
+            )
 
     ip = get_client_ip(request)
     log_audit_event(
@@ -162,7 +181,18 @@ def refresh_token(
             detail="Invalid or expired refresh token.",
         )
     user_id = data.get("sub")
-    user = db.query(User).filter(User.id == user_id).first()
+
+    # A malformed sub reaching a UUID column raises a DataError, which would
+    # surface as a 500 on what is really just a bad token.
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token.",
+        )
+
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -253,12 +283,17 @@ def reset_password(
 
     result = complete_password_reset(db, data.token, data.new_password)
 
-    log_audit_event(
-        db,
-        action="password_reset_completed",
-        ip_address=get_client_ip(request),
-        risk_level="medium"
-    )
+    # The password has already been changed at this point. An audit failure
+    # must not turn a successful reset into a 500 the user reads as failure.
+    try:
+        log_audit_event(
+            db,
+            action="password_reset_completed",
+            ip_address=get_client_ip(request),
+            risk_level="medium"
+        )
+    except Exception as e:
+        logger.error(f"Audit log failed after password reset: {e}")
 
     return result
 
@@ -272,9 +307,11 @@ def verify_reset_token(
     from app.services.email_service import verify_password_reset_token
     try:
         user, _ = verify_password_reset_token(db, token)
+        local, _, domain = user.email.partition("@")
+        masked = f"{local[:3]}***@{domain}" if domain else "***"
         return {
             "valid": True,
-            "email": user.email[:3] + "***" + user.email[user.email.index("@"):]
+            "email": masked
         }
     except HTTPException:
         return {"valid": False}
