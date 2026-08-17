@@ -55,6 +55,31 @@ def generate_account_number(db: Session) -> str:
     )
 
 
+def send_verification_email_task(user_id: str) -> None:
+    """
+    Send the verification email outside the request cycle.
+
+    Opens its own session deliberately. FastAPI closes the request's session
+    during dependency teardown, which happens before background tasks run,
+    so reusing `db` from the route would hit a closed connection.
+
+    Never raises. A mail outage must not surface anywhere, since the
+    registration it belongs to was committed and answered long ago.
+    """
+    from app.core.database import SessionLocal
+    from app.services.email_service import send_verification_email
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            send_verification_email(db, user)
+    except Exception as e:
+        logger.error(f"Verification email failed for user {user_id}: {e}")
+    finally:
+        db.close()
+
+
 def create_user(db: Session, user_in: UserCreate) -> User:
     existing = get_user_by_email(db, user_in.email)
     if existing:
@@ -115,14 +140,9 @@ def create_user(db: Session, user_in: UserCreate) -> User:
 
     db.refresh(user)
 
-    # Send email verification.
-    # Deliberately non-fatal: a mail outage should not fail a registration
-    # that has already been committed.
-    try:
-        from app.services.email_service import send_verification_email
-        send_verification_email(db, user)
-    except Exception as e:
-        logger.error(f"Failed to send verification email: {e}")
+    # The verification email is NOT sent here. It used to be, which meant a
+    # round trip to Resend sat in the middle of the user's registration
+    # request. The route queues send_verification_email_task instead.
 
     return user
 

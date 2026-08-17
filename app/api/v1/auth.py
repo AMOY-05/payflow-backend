@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+)
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -13,7 +15,9 @@ from app.schemas.user import (
     UserCreate, UserOut, UserLogin,
     Token, TokenRefreshRequest
 )
-from app.services.auth_service import create_user, authenticate_user
+from app.services.auth_service import (
+    create_user, authenticate_user, send_verification_email_task
+)
 from app.services.security_service import (
     record_login_attempt,
     check_account_lockout,
@@ -45,11 +49,18 @@ def get_client_ip(request: Request) -> str:
 def register(
     request: Request,
     user_in: UserCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     ip = get_client_ip(request)
     try:
         user = create_user(db, user_in)
+
+        # Queued, not awaited. This makes an HTTP call to Resend, and it used
+        # to run inside create_user, so the user's browser waited for a third
+        # party before the account confirmation came back.
+        background_tasks.add_task(send_verification_email_task, str(user.id))
+
         log_audit_event(
             db,
             action="user_registered",
